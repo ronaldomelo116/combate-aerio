@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Combate Aéreo 16-Bit</title>
+    <title>Combat Xpace 16-bits</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
@@ -182,7 +182,7 @@
     <div id="game-container">
         <canvas id="gameCanvas"></canvas>
         <div id="main-menu" class="menu-overlay">
-            <h1>COMBATE AÉREO</h1>
+            <h1>COMBAT XPACE 16BITS</h1>
             <button id="start-button" class="menu-button">Iniciar Jogo</button>
             <button id="instructions-button" class="menu-button">Instruções</button>
             <button id="ranking-button" class="menu-button">Ranking</button>
@@ -232,8 +232,27 @@
             <button id="pause-button-ui" class="menu-button">||</button>
         </div>
     </div>
-    
     <script>
+	// Isso envia as configurações do Firebase para o seu jogo
+	window.__firebase_config = JSON.stringify({
+    apiKey: "AIzaSyDhAltN7sn3ZaTLZRfW9pkpv45fSJPa89g",
+    authDomain: "combat-xpace-16bit.firebaseapp.com",
+    projectId: "combat-xpace-16bit",
+    storageBucket: "combat-xpace-16bit.firebasestorage.app",
+    messagingSenderId: "322927542557",
+    appId: "1:322927542557:web:cb3317e11b66ba8e8921f4"
+	});
+
+	// Isso define o nome da sua aplicação para uso no Firestore
+	window.__app_id = "combat-xpace-16bit";
+	</script>
+
+    <script type="module">
+        // --- Imports do Firebase ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
+
         // --- Seletores de Elementos ---
         const canvas = document.getElementById('gameCanvas'), ctx = canvas.getContext('2d');
         const uiContainer = document.getElementById('ui-container'), scoreElement = document.getElementById('score'), livesContainer = document.getElementById('lives-container');
@@ -250,7 +269,7 @@
         const instructionsButton = document.getElementById('instructions-button'), backFromInstructionsButton = document.getElementById('back-from-instructions-button');
 
         // --- Constantes e Variáveis de Estado ---
-        const HIGH_SCORES_KEY = 'topGunHighScores', MAX_SCORES = 5;
+        const MAX_SCORES = 10;
         let isGameRunning = false, isPaused = false, score = 0, animationFrameId;
         let difficultyLevel = 0, bossDefeatCount = 0, nextDifficultyThreshold = 200, nextPowerupThreshold = 250, nextGalaxyThreshold = 300, nextBossThreshold = 500;
         let audioUnlocked = false; 
@@ -266,18 +285,45 @@
         const musicTracks = [ { melody: [['C4', 'G3'], 'E4', 'G4', ['A4', 'C4'], 'G4', 'E4', ['C4', 'G3'], null], bassline: ['C2', null, 'G2', null, 'F2', null, 'C2', null], bpm: 140 }, { melody: ['A3', 'E4', 'D4', 'A3', 'F#4', 'E4', 'D4', null], bassline: ['A2', 'A2', 'D2', 'D2', 'E2', 'E2', 'A2', 'A2'], bpm: 120 }, { melody: [['C5', 'G4'], null, ['A#4', 'F4'], null, ['A4', 'E4'], null, ['G#4', 'D#4'], null], bassline: ['C3', 'G2', 'F2', 'C2', 'C3', 'G2', 'F2', 'E2'], bpm: 160 }, { melody: [['F4', 'C4'], ['G4', 'D4'], ['A4', 'F4'], ['G4', 'D4'], null, 'C4', 'D4', 'E4'], bassline: ['F2', 'G2', 'A2', 'G2', 'F2', 'C2', 'D2', 'E2'], bpm: 130 }, { melody: ['D5', null, 'D5', 'A4', 'G4', 'F4', 'G4', null], bassline: ['D3', null, 'A2', null, 'G2', null, 'D2', null], bpm: 150 } ];
         let music = {};
 
+        // --- Configuração do Firebase ---
+        let db, auth;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        async function setupFirebase() {
+             try {
+                const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+                const firebaseConfig = JSON.parse(firebaseConfigString);
+                
+                if(!firebaseConfig.apiKey) {
+                    console.error("Configuração do Firebase não encontrada ou inválida.");
+                    return;
+                }
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                console.log("Firebase conectado. User ID:", auth.currentUser.uid);
+            } catch (error) {
+                console.error("Erro ao inicializar o Firebase:", error);
+            }
+        }
+        
         // --- Inicialização ---
         resizeCanvas(); window.addEventListener('resize', resizeCanvas); ctx.imageSmoothingEnabled = false;
         function resizeCanvas() { canvas.width = window.innerWidth * 0.9; canvas.height = window.innerHeight * 0.8; if (canvas.width > 800) canvas.width = 800; if (canvas.height > 600) canvas.height = 600; initStars(); }
 
         // --- Áudio (Lógica Estável) ---
         function stopAllSounds() {
-            if (music.loop && !music.loop.disposed) { music.loop.stop(0).dispose(); }
-            if (music.synth && !music.synth.disposed) { music.synth.dispose(); }
-            if (music.bassSynth && !music.bassSynth.disposed) { music.bassSynth.dispose(); }
-            if (music.laserHum && !music.laserHum.disposed) { music.laserHum.stop(0).dispose(); }
             Tone.Transport.stop();
             Tone.Transport.cancel(0);
+            if (music.loop && !music.loop.disposed) { music.loop.dispose(); }
+            if (music.synth && !music.synth.disposed) { music.synth.dispose(); }
+            if (music.bassSynth && !music.bassSynth.disposed) { music.bassSynth.dispose(); }
             music = {};
         }
 
@@ -419,7 +465,7 @@
             player.update(lastMouseX, lastMouseY); 
             player.draw();
             if(playerClone) { playerClone.x = player.x - 60; playerClone.y = player.y; ctx.globalAlpha = 0.5; drawPixelArt(playerClone.x - player.width / 2, playerClone.y, player.width, player.height, playerPixels, player.color); ctx.globalAlpha = 1.0; if(playerClone.shootCooldown > 0) playerClone.shootCooldown--; else { player.projectiles.push(new Projectile(playerClone.x, playerClone.y - player.height/2, 'straight')); playerClone.shootCooldown=15; } }
-            enemies.forEach((e, i) => { e.update(); e.draw(); if (e.y > canvas.height + e.height) enemies.splice(i, 1); });
+            enemies.forEach((e, i) => { e.update(); e.draw(); if (e.y > canvas.height + e.height || e.x < -e.width || e.x > canvas.width + e.width) enemies.splice(i, 1); });
             powerups.forEach((p, i) => { p.update(); p.draw(); if (p.y > canvas.height + p.height) powerups.splice(i, 1); });
             player.projectiles.forEach(p => p.draw());
             particles.forEach((p, i) => { p.update(); p.draw(); if(p.life <= 0) particles.splice(i, 1); });
@@ -443,9 +489,10 @@
                 powerup.draw(itemCtx);
             });
         }
-        function getHighScores() { const scoresJSON = localStorage.getItem(HIGH_SCORES_KEY); return scoresJSON ? JSON.parse(scoresJSON) : []; }
-        function saveHighScore(name, score) { const scores = getHighScores(); scores.push({ name, score }); scores.sort((a, b) => b.score - a.score); scores.splice(MAX_SCORES); localStorage.setItem(HIGH_SCORES_KEY, JSON.stringify(scores)); }
-        function showRanking() { mainMenu.classList.add('hidden'); instructionsMenu.classList.add('hidden'); gameOverMenu.classList.add('hidden'); nameInputMenu.classList.add('hidden'); rankingMenu.classList.remove('hidden'); const scores = getHighScores(); highScoreList.innerHTML = ''; if (scores.length === 0) { highScoreList.innerHTML = '<li>Ainda não há recordes. Seja o primeiro!</li>'; } else { scores.forEach((s, index) => { const li = document.createElement('li'); li.innerHTML = `<span>${index + 1}. ${s.name}</span><span>${s.score}</span>`; highScoreList.appendChild(li); }); } }
+        
+        async function getHighScores() { if (!db) return []; const scoresCollectionPath = `artifacts/${appId}/public/data/scores`; const q = query(collection(db, scoresCollectionPath), orderBy("score", "desc"), limit(MAX_SCORES)); const querySnapshot = await getDocs(q); return querySnapshot.docs.map(doc => doc.data()); }
+        async function saveHighScore(name, score) { if (!db || !auth.currentUser) return; try { const scoresCollectionPath = `artifacts/${appId}/public/data/scores`; await addDoc(collection(db, scoresCollectionPath), { name, score, userId: auth.currentUser.uid, createdAt: serverTimestamp() }); } catch (e) { console.error("Error adding document: ", e); } }
+        async function showRanking() { mainMenu.classList.add('hidden'); instructionsMenu.classList.add('hidden'); gameOverMenu.classList.add('hidden'); nameInputMenu.classList.add('hidden'); rankingMenu.classList.remove('hidden'); highScoreList.innerHTML = '<li>Carregando...</li>'; try { const scores = await getHighScores(); highScoreList.innerHTML = ''; if (scores.length === 0) { highScoreList.innerHTML = '<li>Ainda não há recordes. Seja o primeiro!</li>'; } else { scores.forEach((s, index) => { const li = document.createElement('li'); li.innerHTML = `<span>${index + 1}. ${s.name}</span><span>${s.score}</span>`; highScoreList.appendChild(li); }); } } catch (error) { console.error("Error getting high scores: ", error); highScoreList.innerHTML = '<li>Erro ao carregar pontuações.</li>'; } }
         
         function startGame() {
             if (!audioUnlocked) {
@@ -505,7 +552,7 @@
             showMainMenu();
         }
 
-        function endGame() {
+        async function endGame() {
             if (!isGameRunning) return;
             isGameRunning = false; 
             cancelAnimationFrame(animationFrameId);
@@ -516,25 +563,32 @@
             uiContainer.classList.add('hidden');
             pauseButtonContainer.classList.add('hidden');
             createExplosion(player.x, player.y);
+            
+            try {
+                const scores = await getHighScores();
+                const isHighScore = score > 0 && (scores.length < MAX_SCORES || scores.some(s => score > s.score));
 
-            function finalAnimationLoop() {
-                drawBackground();
-                enemies.forEach((e) => e.draw());
-                particles.forEach((p, i) => { p.update(); p.draw(); if(p.life <= 0) particles.splice(i, 1); });
-                
-                if (particles.length > 0) {
-                    requestAnimationFrame(finalAnimationLoop);
-                } else {
-                    finalScoreElement.textContent = `Pontos: ${score}`;
-                    const scores = getHighScores();
-                    if (score > 0 && (scores.length < MAX_SCORES || score > scores[scores.length - 1].score)) {
-                        nameInputMenu.classList.remove('hidden');
+                function finalAnimationLoop() {
+                    drawBackground();
+                    enemies.forEach((e) => e.draw());
+                    particles.forEach((p, i) => { p.update(); p.draw(); if(p.life <= 0) particles.splice(i, 1); });
+                    
+                    if (particles.length > 0) {
+                        requestAnimationFrame(finalAnimationLoop);
                     } else {
-                        gameOverMenu.classList.remove('hidden');
+                        finalScoreElement.textContent = `Pontos: ${score}`;
+                        if (isHighScore) {
+                            nameInputMenu.classList.remove('hidden');
+                        } else {
+                            gameOverMenu.classList.remove('hidden');
+                        }
                     }
                 }
+                finalAnimationLoop();
+            } catch (error) {
+                console.error("Error in endGame after getting scores:", error);
+                gameOverMenu.classList.remove('hidden'); // Fallback to game over menu
             }
-            finalAnimationLoop();
         }
 
         // --- Event Listeners ---
@@ -553,6 +607,7 @@
                 await Tone.start();
                 audioUnlocked = true;
                 console.log("Áudio desbloqueado!");
+                await setupFirebase(); // Configurar o Firebase após o áudio ser liberado
                 window.removeEventListener('click', unlockAudio);
                 window.removeEventListener('touchend', unlockAudio);
             } catch(e) {
@@ -573,9 +628,9 @@
         backFromInstructionsButton.addEventListener('click', showMainMenu);
         pauseButtonUI.addEventListener('click', togglePause);
 
-        saveScoreButton.addEventListener('click', () => {
+        saveScoreButton.addEventListener('click', async () => {
             const name = playerNameInput.value.trim().toUpperCase() || 'AAA';
-            saveHighScore(name, score);
+            await saveHighScore(name, score);
             showRanking();
         });
         
